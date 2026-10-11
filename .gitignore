@@ -49,5 +49,6 @@ app.*.map.json
 # when generating a local APK and must never be committed.
 /android/local.properties
 /android/key.properties
+/ios/*.mobileconfig
 *.jks
 *.keystore

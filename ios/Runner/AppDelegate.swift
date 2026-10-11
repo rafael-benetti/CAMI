@@ -70,7 +70,7 @@ import UIKit
     }
 
     PHPhotoLibrary.shared().performChanges({
-      let request = PHAssetCreationRequest.creationRequestForAsset()
+      let request = PHAssetCreationRequest.forAsset()
       request.addResource(with: .photo, data: imageData, options: nil)
     }) { success, error in
       DispatchQueue.main.async {
