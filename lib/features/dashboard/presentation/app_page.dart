@@ -128,6 +128,13 @@ class _AppPageState extends State<AppPage> {
   Widget buildHomeHeader() {
     return Row(
       children: [
+        Image.asset(
+          'assets/logo.png',
+          width: 28,
+          height: 28,
+          fit: BoxFit.contain,
+        ),
+        const SizedBox(width: 8),
         Expanded(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 180),

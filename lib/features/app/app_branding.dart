@@ -5,27 +5,12 @@ import '../../core/constants/app_colors.dart';
 class Logo extends StatelessWidget {
   const Logo({super.key});
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 43,
-          height: 43,
-          decoration: BoxDecoration(
-            color: blue,
-            borderRadius: BorderRadius.circular(13),
-          ),
-          child: const Icon(Icons.videocam_outlined, size: 25),
-        ),
-        const SizedBox(width: 10),
-        const Text(
-          'CAMI',
-          style: TextStyle(fontSize: 29, fontWeight: FontWeight.bold),
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => Image.asset(
+    'assets/logo.png',
+    width: 128,
+    height: 128,
+    fit: BoxFit.contain,
+  );
 }
 
 class SplashPage extends StatelessWidget {
