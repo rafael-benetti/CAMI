@@ -5,7 +5,10 @@ Aplicativo Flutter para monitoramento de câmeras pelo Frigate NVR. O CAMI auten
 ## Estado atual
 
 - Login direto no Frigate.
-- Listagem de câmeras configuradas no NVR e vídeo ao vivo via go2rtc.
+- Listagem de câmeras configuradas no NVR, limitada ao papel autenticado no
+  Frigate, e vídeo ao vivo via go2rtc.
+- Grupos de câmeras do Frigate como filtro na Home; grupos não autorizam
+  acesso por si só, o papel do Frigate é a autoridade.
 - Histórico diário de gravações, download autenticado do MP4 e reprodução local.
 - Snapshot no ao vivo ou durante uma gravação.
 - Indicador de armazenamento do Frigate.
@@ -29,6 +32,12 @@ flutter test
 Por padrão, o app usa `https://cameraspmi.creativewave.com.br`. O endereço pode
 ser substituído em builds de desenvolvimento com
 `--dart-define=FRIGATE_BASE_URL=<url-do-frigate>`.
+
+Para limitar uma conta, configure um papel customizado em `auth.roles` no
+Frigate e atribua esse papel ao usuário. O CAMI recebe o papel em `/api/auth`,
+cruza suas câmeras com `/api/config` e não usa `/api/go2rtc/streams` para
+descoberta. `camera_groups` serve para organizar a Home e só mostra câmeras já
+permitidas pelo papel.
 
 No iOS, abra `ios/Runner.xcworkspace` (não apenas o `.xcodeproj`). O deployment target mínimo está em 15.0.
 

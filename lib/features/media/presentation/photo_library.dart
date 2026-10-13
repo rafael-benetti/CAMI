@@ -13,6 +13,7 @@ class PhotoLibrary extends StatelessWidget {
   final bool loading;
   final Future<void> Function() onRefresh;
   final ValueChanged<LocalPhoto> onOpen;
+  final Future<void> Function(LocalPhoto) onDelete;
 
   const PhotoLibrary({
     super.key,
@@ -20,7 +21,44 @@ class PhotoLibrary extends StatelessWidget {
     required this.loading,
     required this.onRefresh,
     required this.onOpen,
+    required this.onDelete,
   });
+
+  Future<void> _confirmDelete(BuildContext context, LocalPhoto photo) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Excluir snapshot?'),
+        content: Text(
+          'A foto de ${photo.cameraName} será removida deste aparelho.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      await onDelete(photo);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Snapshot excluído.')));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível excluir o snapshot.')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,6 +120,7 @@ class PhotoLibrary extends StatelessWidget {
               clipBehavior: Clip.antiAlias,
               child: InkWell(
                 onTap: () => onOpen(photo),
+                onLongPress: () => unawaited(_confirmDelete(context, photo)),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

@@ -20,7 +20,7 @@ O CAMI já possui uma base útil:
 - login no Frigate, sessão persistida e desbloqueio biométrico;
 - listagem de streams, thumbnail, visualização ao vivo por HLS e snapshot;
 - linha do tempo de gravações, armazenamento do NVR e bibliotecas locais;
-- cache local de cards e de miniaturas;
+- cache local de miniaturas;
 
 Porém, ainda não deve ser tratado como aplicativo de monitoramento pronto para
 produção. Os quatro pontos que mais afetam a sensação de velocidade e a
@@ -48,9 +48,9 @@ abertura
   -> acessa o endpoint HTTPS público do Frigate
   -> restaura token e usuário do SharedPreferences
   -> biometria
-  -> exibe cache de cards e miniaturas
-  -> consulta /api/config e /api/go2rtc/streams no Frigate
-  -> monta HLS de cada stream e busca latest.jpg para os cards
+  -> consulta /api/config autenticado no Frigate
+  -> limita câmeras ao papel da sessão e organiza grupos autorizados
+  -> aplica miniaturas em cache e busca latest.jpg para os cards
 
 toque no card
   -> cria Player media_kit
@@ -344,6 +344,10 @@ Implementado nesta primeira entrega:
   LRU limitado a 250 MB;
 - `flutter analyze` ficou sem avisos e há testes para grade virtualizada e
   regras de cache.
+- a descoberta de câmeras agora usa somente `/api/config`: o papel da sessão é
+  cruzado com `auth.roles`, e `camera_groups` vira filtro de organização já
+  limitado às câmeras permitidas. A antiga consulta a `/api/go2rtc/streams` foi
+  removida da descoberta para não expor nomes de streams fora do papel.
 
 Ainda depende de configuração/decisão externa e não foi implementado:
 

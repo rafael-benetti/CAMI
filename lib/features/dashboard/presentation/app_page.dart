@@ -7,6 +7,7 @@ import '../../../core/services/frigate_client.dart';
 import '../../../data/local/local_photo_store.dart';
 import '../../../data/local/local_recording_store.dart';
 import '../../../models/camera_item.dart';
+import '../../../models/camera_group.dart';
 import '../../../models/local_photo.dart';
 import '../../../models/local_recording.dart';
 import '../../cameras/widgets/home_content.dart';
@@ -19,6 +20,7 @@ class AppPage extends StatefulWidget {
   final Screen screen;
   final void Function(Screen) go;
   final List<CameraItem> cameras;
+  final List<CameraGroup> cameraGroups;
   final void Function(CameraItem) onOpenCamera;
   final Future<void> Function() onRefreshCameras;
   final bool canAddCamera;
@@ -31,6 +33,7 @@ class AppPage extends StatefulWidget {
     required this.screen,
     required this.go,
     required this.cameras,
+    required this.cameraGroups,
     required this.onOpenCamera,
     required this.onRefreshCameras,
     required this.canAddCamera,
@@ -93,12 +96,20 @@ class _AppPageState extends State<AppPage> {
 
   Future<void> loadPhotos() async {
     final loaded = await LocalPhotoStore.load();
+    loaded.sort(
+      (first, second) => second.capturedAt.compareTo(first.capturedAt),
+    );
     if (mounted) {
       setState(() {
         photos = loaded;
         photosLoading = false;
       });
     }
+  }
+
+  Future<void> deletePhoto(LocalPhoto photo) async {
+    await LocalPhotoStore.delete(photo);
+    await loadPhotos();
   }
 
   Future<void> openPhoto(LocalPhoto photo) async {
@@ -180,6 +191,7 @@ class _AppPageState extends State<AppPage> {
             ? HomeContent(
                 header: buildHomeHeader(),
                 cameras: widget.cameras,
+                cameraGroups: widget.cameraGroups,
                 searchQuery: searchQuery,
                 onOpen: widget.onOpenCamera,
                 onRefresh: widget.onRefreshCameras,
@@ -202,6 +214,7 @@ class _AppPageState extends State<AppPage> {
                       loading: photosLoading,
                       onRefresh: loadPhotos,
                       onOpen: openPhoto,
+                      onDelete: deletePhoto,
                     ),
                   if (widget.screen == Screen.recordings)
                     RecordingLibrary(

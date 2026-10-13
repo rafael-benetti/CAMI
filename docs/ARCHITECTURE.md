@@ -15,7 +15,7 @@ lib/
 │   ├── services/      # Integração de mídia e captura RTSP
 │   └── utils/         # Formatadores puros
 ├── data/
-│   ├── cache/         # Cards e miniaturas persistentes
+│   ├── cache/         # Miniaturas e mídia persistentes
 │   └── local/         # Catálogo local de fotos e gravações
 ├── models/            # Entidades imutáveis do app
 └── features/
@@ -50,8 +50,6 @@ sem introduzir uma nova biblioteca de gerenciamento de estado.
 
 ## Dados locais
 
-- `CameraCardCache` mantém o conteúdo visual dos cards por usuário, sem guardar
-  novamente URLs RTSP no cache.
 - `ThumbnailCache` persiste miniaturas das câmeras.
 - `LocalPhotoStore` cataloga os snapshots que aparecem em **Fotos**.
 - `LocalRecordingStore` cataloga as gravações que aparecem em **Gravações**.
@@ -61,9 +59,13 @@ sem introduzir uma nova biblioteca de gerenciamento de estado.
 `media_kit` mantém a visualização ao vivo e a captura de frames. A gravação é
 iniciada por uma sessão FFmpeg dedicada e o salvamento de snapshots na galeria
 continua sendo feito pelos canais nativos Android/iOS. O `FrigateClient` acessa
-o Frigate pelo endpoint HTTPS público: o administrador sincroniza os nomes dos
-streams, a API mantém as permissões do CAMI e o app consome HLS e o frame atual
-do Frigate em vez de abrir RTSP privado diretamente.
+o Frigate pelo endpoint HTTPS público. Após o login, o cliente lê o papel
+retornado por `/api/auth` e limita as câmeras da configuração ao respectivo
+`auth.roles`. `camera_groups` é aplicado somente como organização da Home, já
+intersectado com as câmeras permitidas. O app não usa
+`/api/go2rtc/streams` para descobrir câmeras, evitando exibir streams fora do
+papel. Em seguida, ele consome HLS e o frame atual do Frigate em vez de abrir
+RTSP privado diretamente.
 
 Os arquivos nativos seguem em `android/` e `ios/`; não há alteração do contrato
 do `MethodChannel` `br.gov.itapema.cami/media`.

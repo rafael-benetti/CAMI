@@ -82,6 +82,14 @@ class LocalPhotoStore {
     return photo;
   }
 
+  /// Removes both the local image file and its library entry.
+  static Future<void> delete(LocalPhoto photo) async {
+    final current = await load();
+    final file = File(photo.path);
+    if (await file.exists()) await file.delete();
+    await _write(current.where((item) => item.path != photo.path).toList());
+  }
+
   static Future<void> _write(List<LocalPhoto> photos) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(

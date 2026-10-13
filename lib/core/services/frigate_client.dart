@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../../models/auth_session.dart';
+import '../../models/camera_group.dart';
 import '../../models/frigate_storage.dart';
 
 class FrigateException implements Exception {
@@ -17,6 +18,13 @@ class FrigateCamera {
   final String name;
 
   const FrigateCamera(this.name);
+}
+
+class FrigateCameraCatalog {
+  final List<FrigateCamera> cameras;
+  final List<CameraGroup> groups;
+
+  const FrigateCameraCatalog({required this.cameras, required this.groups});
 }
 
 class FrigateRecording {
@@ -127,63 +135,54 @@ class FrigateClient {
     }
 
     final remoteUser = auth.headers['remote-user'] ?? username.trim();
+    final remoteRole = auth.headers['remote-role']?.trim();
     return AuthSession(
       token: token,
       user: {
         'name': remoteUser,
         'email': remoteUser,
-        // O app usa somente recursos de visualização do Frigate. A
-        // administração continua sendo feita pela interface do próprio NVR.
-        'role': 'viewer',
+        // The authenticated Frigate role controls the cameras visible in CAMI.
+        'role': remoteRole == null || remoteRole.isEmpty
+            ? 'viewer'
+            : remoteRole,
         'can_create_cameras': false,
       },
     );
   }
 
-  Future<List<FrigateCamera>> fetchCameras({required String token}) async {
-    Map<String, dynamic>? config;
-    Map<String, dynamic>? streams;
+  Future<List<FrigateCamera>> fetchCameras({required String token}) async =>
+      (await fetchCameraCatalog(token: token, role: 'viewer')).cameras;
 
-    try {
-      final response = await _getAuthenticated(
-        _uri('/api/config'),
-        token: token,
-      );
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        final decoded = jsonDecode(response.body);
-        if (decoded is Map<String, dynamic>) config = decoded;
-      }
-    } on FrigateException {
-      rethrow;
-    } catch (_) {
-      // Em algumas instalações a listagem de streams ainda está disponível.
-    }
-
-    try {
-      final response = await _getAuthenticated(
-        _uri('/api/go2rtc/streams'),
-        token: token,
-      );
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        final decoded = jsonDecode(response.body);
-        if (decoded is Map<String, dynamic>) streams = decoded;
-      }
-    } on FrigateException {
-      if (config == null) rethrow;
-    } catch (_) {
-      // A configuração ainda é uma fonte válida de nomes de câmeras.
-    }
-
-    final configured = _cameraNames(config?['cameras']);
-    final availableStreams = _cameraNames(streams);
-    final names = availableStreams.isNotEmpty ? availableStreams : configured;
-    if (names.isEmpty) {
+  Future<FrigateCameraCatalog> fetchCameraCatalog({
+    required String token,
+    required String role,
+  }) async {
+    final response = await _getAuthenticated(_uri('/api/config'), token: token);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
       throw const FrigateException(
-        'O Frigate não retornou nenhuma câmera. Verifique a sessão e a configuração do go2rtc.',
+        'Não foi possível consultar as câmeras autorizadas no Frigate.',
       );
     }
-    return names.map(FrigateCamera.new).toList()
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FrigateException(
+        'O Frigate retornou uma configuração inválida de câmeras.',
+      );
+    }
+
+    final configured = _cameraNames(decoded['cameras']);
+    final allowed = _allowedCameraNames(decoded, role, configured);
+    if (allowed.isEmpty) {
+      throw const FrigateException('Sua conta não possui câmeras autorizadas.');
+    }
+
+    final cameras = allowed.map(FrigateCamera.new).toList()
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return FrigateCameraCatalog(
+      cameras: cameras,
+      groups: _cameraGroups(decoded['camera_groups'], allowed),
+    );
   }
 
   /// Reads the documented Prometheus storage gauges from Frigate. The values
@@ -360,6 +359,70 @@ class FrigateClient {
         .where((name) => name.isNotEmpty && name.toLowerCase() != 'birdseye')
         .toSet();
   }
+
+  Set<String> _allowedCameraNames(
+    Map<String, dynamic> config,
+    String role,
+    Set<String> configured,
+  ) {
+    final normalizedRole = role.trim();
+    if (normalizedRole == 'admin' || normalizedRole == 'viewer') {
+      return configured;
+    }
+
+    final auth = config['auth'];
+    final roles = auth is Map ? auth['roles'] : null;
+    final roleCameras = roles is Map ? roles[normalizedRole] : null;
+    if (roleCameras is! List) return <String>{};
+    // In Frigate, a custom role with an empty camera list deliberately means
+    // access to every camera, not access to none.
+    if (roleCameras.isEmpty) return configured;
+    return roleCameras.whereType<String>().where(configured.contains).toSet();
+  }
+
+  List<CameraGroup> _cameraGroups(Object? value, Set<String> allowed) {
+    if (value is! Map) return const <CameraGroup>[];
+    final groups = <CameraGroup>[];
+    for (final entry in value.entries) {
+      if (entry.key is! String || entry.value is! Map) continue;
+      final group = entry.value as Map;
+      final names = group['cameras'];
+      if (names is! List) continue;
+      final cameraIds = names
+          .whereType<String>()
+          .where(allowed.contains)
+          .map(_cameraId)
+          .toSet();
+      if (cameraIds.isEmpty) continue;
+      groups.add(
+        CameraGroup(
+          name: _displayName(entry.key as String),
+          order: (group['order'] as num?)?.toInt() ?? groups.length,
+          cameraIds: cameraIds,
+        ),
+      );
+    }
+    groups.sort((first, second) {
+      final order = first.order.compareTo(second.order);
+      return order != 0 ? order : first.name.compareTo(second.name);
+    });
+    return groups;
+  }
+
+  static int _cameraId(String name) {
+    var hash = 0x811c9dc5;
+    for (final codeUnit in name.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 0x01000193) & 0x7fffffff;
+    }
+    return hash == 0 ? 1 : hash;
+  }
+
+  static String _displayName(String value) => value
+      .split('_')
+      .where((word) => word.isNotEmpty)
+      .map((word) => '${word[0].toUpperCase()}${word.substring(1)}')
+      .join(' ');
 
   String liveUrl(String cameraName) => _uri(
     '/api/go2rtc/api/stream.m3u8',

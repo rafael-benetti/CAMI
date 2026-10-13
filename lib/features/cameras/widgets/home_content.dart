@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../models/camera_group.dart';
 import '../../../models/camera_item.dart';
 import 'camera_tile.dart';
 
-class HomeContent extends StatelessWidget {
+class HomeContent extends StatefulWidget {
   final Widget header;
   final List<CameraItem> cameras;
+  final List<CameraGroup> cameraGroups;
   final String searchQuery;
   final void Function(CameraItem) onOpen;
   final Future<void> Function() onRefresh;
@@ -15,18 +17,52 @@ class HomeContent extends StatelessWidget {
     super.key,
     required this.header,
     required this.cameras,
+    required this.cameraGroups,
     required this.searchQuery,
     required this.onOpen,
     required this.onRefresh,
     required this.thumbnailLoadingIds,
   });
+
+  @override
+  State<HomeContent> createState() => _HomeContentState();
+}
+
+class _HomeContentState extends State<HomeContent> {
+  String? selectedGroupName;
+
+  @override
+  void didUpdateWidget(covariant HomeContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (selectedGroupName != null &&
+        !widget.cameraGroups.any((group) => group.name == selectedGroupName)) {
+      selectedGroupName = null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final onlineCount = cameras.where((camera) => camera.online).length;
-    final offlineCount = cameras.length - onlineCount;
-    final normalizedQuery = searchQuery.trim().toLowerCase();
+    CameraGroup? selectedGroup;
+    for (final group in widget.cameraGroups) {
+      if (group.name == selectedGroupName) {
+        selectedGroup = group;
+        break;
+      }
+    }
+    final selectedCameraIds = selectedGroup?.cameraIds;
+    final groupedCameras = selectedCameraIds == null
+        ? widget.cameras
+        : widget.cameras
+              .where(
+                (camera) =>
+                    camera.id != null && selectedCameraIds.contains(camera.id),
+              )
+              .toList();
+    final onlineCount = groupedCameras.where((camera) => camera.online).length;
+    final offlineCount = groupedCameras.length - onlineCount;
+    final normalizedQuery = widget.searchQuery.trim().toLowerCase();
     final visibleCameras =
-        cameras
+        groupedCameras
             .where(
               (camera) => camera.name.toLowerCase().contains(normalizedQuery),
             )
@@ -36,7 +72,7 @@ class HomeContent extends StatelessWidget {
                 first.name.toLowerCase().compareTo(second.name.toLowerCase()),
           );
     return RefreshIndicator(
-      onRefresh: onRefresh,
+      onRefresh: widget.onRefresh,
       child: CustomScrollView(
         key: const PageStorageKey<String>('camera-home-scroll'),
         physics: const AlwaysScrollableScrollPhysics(),
@@ -47,7 +83,7 @@ class HomeContent extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  header,
+                  widget.header,
                   const SizedBox(height: 22),
                   Container(
                     height: 44,
@@ -88,6 +124,38 @@ class HomeContent extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 21),
+                  if (widget.cameraGroups.isNotEmpty) ...[
+                    SizedBox(
+                      height: 34,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: const Text('Todas'),
+                              selected: selectedGroupName == null,
+                              onSelected: (_) =>
+                                  setState(() => selectedGroupName = null),
+                            ),
+                          ),
+                          ...widget.cameraGroups.map(
+                            (group) => Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                label: Text(group.name),
+                                selected: selectedGroupName == group.name,
+                                onSelected: (_) => setState(
+                                  () => selectedGroupName = group.name,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 15),
+                  ],
                   Row(
                     children: [
                       const Text(
@@ -99,7 +167,7 @@ class HomeContent extends StatelessWidget {
                       ),
                       const SizedBox(width: 7),
                       Text(
-                        '${cameras.length} câmeras',
+                        '${groupedCameras.length} câmeras',
                         style: const TextStyle(color: muted, fontSize: 9),
                       ),
                     ],
@@ -109,7 +177,7 @@ class HomeContent extends StatelessWidget {
               ),
             ),
           ),
-          if (cameras.isEmpty)
+          if (widget.cameras.isEmpty)
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               sliver: SliverToBoxAdapter(
@@ -147,8 +215,8 @@ class HomeContent extends StatelessWidget {
                     thumbnail: camera.thumbnail,
                     thumbnailLoading:
                         camera.id != null &&
-                        thumbnailLoadingIds.contains(camera.id),
-                    onTap: () => onOpen(camera),
+                        widget.thumbnailLoadingIds.contains(camera.id),
+                    onTap: () => widget.onOpen(camera),
                   );
                 },
               ),

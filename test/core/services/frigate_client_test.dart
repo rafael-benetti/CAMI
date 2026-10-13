@@ -120,6 +120,77 @@ frigate_storage_used_bytes{storage="/media/frigate/recordings"} 250000000000
     expect(recordings.single.end.isAfter(recordings.single.start), isTrue);
   });
 
+  test('limits catalog and groups to the authenticated custom role', () async {
+    final client = MockClient((request) async {
+      expect(request.url.path, '/api/config');
+      expect(request.headers['authorization'], 'Bearer restricted-token');
+      return http.Response(
+        jsonEncode({
+          'cameras': {'entrada': {}, 'patio': {}, 'administracao': {}},
+          'auth': {
+            'roles': {
+              'obras': ['entrada', 'patio'],
+            },
+          },
+          'camera_groups': {
+            'administracao': {
+              'order': 0,
+              'cameras': ['administracao'],
+            },
+            'patio': {
+              'order': 1,
+              'cameras': ['patio'],
+            },
+            'portaria': {
+              'order': 2,
+              'cameras': ['entrada', 'administracao'],
+            },
+          },
+        }),
+        200,
+      );
+    });
+    final frigate = FrigateClient(
+      baseUrl: 'https://frigate.example.test',
+      client: client,
+    );
+
+    final catalog = await frigate.fetchCameraCatalog(
+      token: 'restricted-token',
+      role: 'obras',
+    );
+
+    expect(catalog.cameras.map((camera) => camera.name), ['entrada', 'patio']);
+    expect(catalog.groups.map((group) => group.name), ['Patio', 'Portaria']);
+    expect(catalog.groups.map((group) => group.cameraIds.length), [1, 1]);
+  });
+
+  test('accepts an empty custom role camera list as all cameras', () async {
+    final client = MockClient((request) async {
+      expect(request.url.path, '/api/config');
+      return http.Response(
+        jsonEncode({
+          'cameras': {'entrada': {}, 'patio': {}},
+          'auth': {
+            'roles': {'monitoramento': <String>[]},
+          },
+        }),
+        200,
+      );
+    });
+    final frigate = FrigateClient(
+      baseUrl: 'https://frigate.example.test',
+      client: client,
+    );
+
+    final catalog = await frigate.fetchCameraCatalog(
+      token: 'role-token',
+      role: 'monitoramento',
+    );
+
+    expect(catalog.cameras.map((camera) => camera.name), ['entrada', 'patio']);
+  });
+
   test('downloads a recording clip before local playback', () async {
     final client = MockClient((request) async {
       expect(request.method, 'GET');

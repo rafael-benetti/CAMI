@@ -11,9 +11,9 @@ import '../../core/services/frigate_client.dart';
 import '../../core/services/biometric_auth.dart';
 import '../../core/navigation/app_screen.dart';
 import '../../core/services/video_thumbnail_capture.dart';
-import '../../data/cache/camera_card_cache.dart';
 import '../../data/cache/thumbnail_cache.dart';
 import '../../models/auth_session.dart';
+import '../../models/camera_group.dart';
 import '../../models/camera_item.dart';
 import 'app_branding.dart';
 import '../auth/presentation/login_page.dart';
@@ -44,14 +44,15 @@ class _RouterPageState extends State<RouterPage> {
   late Screen screen;
   bool restoringSession = false;
   String? authToken;
+  String currentUserRole = 'viewer';
   bool isAdmin = false;
   bool canCreateCameras = false;
+  List<CameraGroup> cameraGroups = const <CameraGroup>[];
   CameraItem? selectedCamera;
   CameraItem? editingCamera;
   final List<CameraItem> cameras = [];
   final Set<int> thumbnailJobs = <int>{};
   int thumbnailRefreshGeneration = 0;
-  String? cameraCacheKey;
 
   @override
   void initState() {
@@ -88,21 +89,17 @@ class _RouterPageState extends State<RouterPage> {
           return;
         }
       }
-      final cacheKey = CameraCardCache.keyFor(restoredUser);
-      final cachedCameras = await CameraCardCache.load(cacheKey);
       if (!mounted) return;
       setState(() {
         authToken = token;
-        cameraCacheKey = cacheKey;
+        currentUserRole = restoredUser['role'] as String? ?? 'viewer';
         isAdmin = false;
         canCreateCameras = false;
-        cameras
-          ..clear()
-          ..addAll(cachedCameras);
+        cameras.clear();
+        cameraGroups = const <CameraGroup>[];
         screen = Screen.home;
         restoringSession = false;
       });
-      unawaited(loadCachedThumbnails(cachedCameras));
       unawaited(initializeAuthenticatedSession());
     } else {
       if (!mounted) return;
@@ -116,10 +113,11 @@ class _RouterPageState extends State<RouterPage> {
     final token = authToken;
     if (token == null) return;
     try {
-      final frigateCameras = await widget.frigateClient.fetchCameras(
+      final catalog = await widget.frigateClient.fetchCameraCatalog(
         token: token,
+        role: currentUserRole,
       );
-      final loaded = frigateCameras
+      final loaded = catalog.cameras
           .map(
             (camera) => CameraItem(
               id: frigateCameraId(camera.name),
@@ -135,8 +133,8 @@ class _RouterPageState extends State<RouterPage> {
         cameras
           ..clear()
           ..addAll(loaded);
+        cameraGroups = catalog.groups;
       });
-      unawaited(CameraCardCache.save(cameraCacheKey, loaded));
       final cachedCameraIds = await loadCachedThumbnails(loaded);
       if (!mounted) return;
       unawaited(refreshCameraThumbnails(skipCameraIds: cachedCameraIds));
@@ -304,9 +302,9 @@ class _RouterPageState extends State<RouterPage> {
   void handleAuthenticated(AuthSession session) {
     setState(() {
       authToken = session.token;
+      currentUserRole = session.user['role'] as String? ?? 'viewer';
       isAdmin = false;
       canCreateCameras = false;
-      cameraCacheKey = CameraCardCache.keyFor(session.user);
       screen = Screen.home;
     });
     unawaited(saveSession(session));
@@ -334,9 +332,10 @@ class _RouterPageState extends State<RouterPage> {
     if (!mounted) return;
     setState(() {
       authToken = null;
+      currentUserRole = 'viewer';
       isAdmin = false;
       canCreateCameras = false;
-      cameraCacheKey = null;
+      cameraGroups = const <CameraGroup>[];
       cameras.clear();
       thumbnailJobs.clear();
       selectedCamera = null;
@@ -431,6 +430,7 @@ class _RouterPageState extends State<RouterPage> {
       screen: screen,
       go: go,
       cameras: cameras,
+      cameraGroups: cameraGroups,
       onOpenCamera: openCamera,
       onRefreshCameras: loadCameras,
       canAddCamera: false,
