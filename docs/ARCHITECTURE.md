@@ -25,7 +25,7 @@ lib/
     ├── dashboard/     # Navegação inferior e tela principal
     ├── live/          # Player, controles e tela cheia
     ├── media/         # Fotos e gravações locais
-    └── settings/      # Configurações e perfis VPN
+    └── settings/      # Configurações e saída de sessão
 ```
 
 ## Fluxo principal
@@ -61,13 +61,9 @@ sem introduzir uma nova biblioteca de gerenciamento de estado.
 `media_kit` mantém a visualização ao vivo e a captura de frames. A gravação é
 iniciada por uma sessão FFmpeg dedicada e o salvamento de snapshots na galeria
 continua sendo feito pelos canais nativos Android/iOS. O `FrigateClient` acessa
-o Frigate pela rede/VPN do próprio aparelho: o administrador sincroniza os
-nomes dos streams, a API mantém as permissões do CAMI e o app consome HLS e o
-frame atual do Frigate em vez de abrir RTSP privado diretamente.
-
-Os perfis VPN são separados para Android e iOS e armazenam o endereço do
-servidor, conta, senha, segredo compartilhado e grupo opcional em um payload
-criptografado no backend.
+o Frigate pelo endpoint HTTPS público: o administrador sincroniza os nomes dos
+streams, a API mantém as permissões do CAMI e o app consome HLS e o frame atual
+do Frigate em vez de abrir RTSP privado diretamente.
 
 Os arquivos nativos seguem em `android/` e `ios/`; não há alteração do contrato
 do `MethodChannel` `br.gov.itapema.cami/media`.

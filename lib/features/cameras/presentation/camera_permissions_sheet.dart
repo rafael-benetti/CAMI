@@ -158,7 +158,7 @@ class _CameraPermissionsSheetState extends State<CameraPermissionsSheet> {
                 Expanded(
                   child: ListView.separated(
                     itemCount: users.length,
-                    separatorBuilder: (_, __) =>
+                    separatorBuilder: (_, _) =>
                         const Divider(height: 1, color: panelBorder),
                     itemBuilder: (context, index) {
                       final user = users[index];

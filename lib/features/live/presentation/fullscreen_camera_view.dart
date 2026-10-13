@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
-import '../../../core/constants/app_colors.dart';
-
 class FullscreenCameraView extends StatefulWidget {
   final VideoController controller;
   final String cameraName;

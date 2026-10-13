@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/media_share_service.dart';
-import '../../../core/utils/local_date_formatters.dart';
 import '../../../models/local_photo.dart';
 import '../../dashboard/widgets/list_content.dart';
 
@@ -92,7 +91,7 @@ class PhotoLibrary extends StatelessWidget {
                         child: Image.file(
                           File(photo.path),
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Center(
+                          errorBuilder: (_, _, _) => const Center(
                             child: Icon(
                               Icons.broken_image_outlined,
                               color: muted,
@@ -167,7 +166,7 @@ class LocalPhotoPage extends StatelessWidget {
                   child: Image.file(
                     File(photo.path),
                     fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Icon(
+                    errorBuilder: (_, _, _) => const Icon(
                       Icons.broken_image_outlined,
                       color: muted,
                       size: 48,

@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../../core/constants/app_colors.dart';
 import '../../../core/navigation/app_screen.dart';
 import '../../../core/services/frigate_client.dart';
 import '../../../data/local/local_photo_store.dart';
@@ -21,9 +20,9 @@ class AppPage extends StatefulWidget {
   final void Function(Screen) go;
   final List<CameraItem> cameras;
   final void Function(CameraItem) onOpenCamera;
+  final Future<void> Function() onRefreshCameras;
   final bool canAddCamera;
   final VoidCallback onLogout;
-  final Future<void> Function() onDisconnectVpn;
   final FrigateClient frigateClient;
   final String? frigateToken;
   final Set<int> thumbnailLoadingIds;
@@ -33,9 +32,9 @@ class AppPage extends StatefulWidget {
     required this.go,
     required this.cameras,
     required this.onOpenCamera,
+    required this.onRefreshCameras,
     required this.canAddCamera,
     required this.onLogout,
-    required this.onDisconnectVpn,
     required this.frigateClient,
     required this.frigateToken,
     required this.thumbnailLoadingIds,
@@ -177,53 +176,50 @@ class _AppPageState extends State<AppPage> {
     };
     return Scaffold(
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (widget.screen == Screen.home)
-              buildHomeHeader()
-            else
-              Text(
-                titles[widget.screen] ?? 'CAMI',
-                style: const TextStyle(
-                  fontSize: 23,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            const SizedBox(height: 22),
-            if (widget.screen == Screen.home)
-              HomeContent(
+        child: widget.screen == Screen.home
+            ? HomeContent(
+                header: buildHomeHeader(),
                 cameras: widget.cameras,
                 searchQuery: searchQuery,
                 onOpen: widget.onOpenCamera,
+                onRefresh: widget.onRefreshCameras,
                 thumbnailLoadingIds: widget.thumbnailLoadingIds,
+              )
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Text(
+                    titles[widget.screen] ?? 'CAMI',
+                    style: const TextStyle(
+                      fontSize: 23,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  if (widget.screen == Screen.photos)
+                    PhotoLibrary(
+                      photos: photos,
+                      loading: photosLoading,
+                      onRefresh: loadPhotos,
+                      onOpen: openPhoto,
+                    ),
+                  if (widget.screen == Screen.recordings)
+                    RecordingLibrary(
+                      recordings: recordings,
+                      loading: recordingsLoading,
+                      onRefresh: loadRecordings,
+                      onOpen: openRecording,
+                    ),
+                  if (widget.screen == Screen.storage &&
+                      widget.frigateToken != null)
+                    StorageContent(
+                      frigateClient: widget.frigateClient,
+                      token: widget.frigateToken!,
+                    ),
+                  if (widget.screen == Screen.settings)
+                    SettingsContent(onLogout: widget.onLogout),
+                ],
               ),
-            if (widget.screen == Screen.photos)
-              PhotoLibrary(
-                photos: photos,
-                loading: photosLoading,
-                onRefresh: loadPhotos,
-                onOpen: openPhoto,
-              ),
-            if (widget.screen == Screen.recordings)
-              RecordingLibrary(
-                recordings: recordings,
-                loading: recordingsLoading,
-                onRefresh: loadRecordings,
-                onOpen: openRecording,
-              ),
-            if (widget.screen == Screen.storage && widget.frigateToken != null)
-              StorageContent(
-                frigateClient: widget.frigateClient,
-                token: widget.frigateToken!,
-              ),
-            if (widget.screen == Screen.settings)
-              SettingsContent(
-                onLogout: widget.onLogout,
-                onDisconnectVpn: widget.onDisconnectVpn,
-              ),
-          ],
-        ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: [

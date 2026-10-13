@@ -71,7 +71,7 @@ class RecentSnapshotCards extends StatelessWidget {
                             child: Image.file(
                               File(snapshot.path),
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => const Center(
+                              errorBuilder: (_, _, _) => const Center(
                                 child: Icon(
                                   Icons.broken_image_outlined,
                                   color: muted,

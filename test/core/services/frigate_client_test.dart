@@ -7,6 +7,10 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('uses the public Frigate endpoint by default', () {
+    expect(FrigateClient().baseUrl, 'https://cameraspmi.creativewave.com.br');
+  });
+
   test('authenticates with Frigate and lists configured cameras', () async {
     final client = MockClient((request) async {
       switch (request.url.path) {

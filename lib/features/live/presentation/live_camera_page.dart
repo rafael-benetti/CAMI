@@ -1,16 +1,15 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/frigate_client.dart';
 import '../../../core/services/media_library.dart';
 import '../../../core/services/media_share_service.dart';
+import '../../../data/cache/media_cache.dart';
 import '../../../data/local/local_photo_store.dart';
 import '../../../models/camera_item.dart';
 import '../../../models/local_photo.dart';
@@ -37,7 +36,10 @@ class LiveCameraPage extends StatefulWidget {
   State<LiveCameraPage> createState() => _LiveCameraPageState();
 }
 
-class _LiveCameraPageState extends State<LiveCameraPage> {
+enum _LiveConnectionState { connecting, live, reconnecting, paused, offline }
+
+class _LiveCameraPageState extends State<LiveCameraPage>
+    with WidgetsBindingObserver {
   bool takingSnapshot = false;
   late final Player player;
   late final VideoController videoController;
@@ -53,6 +55,9 @@ class _LiveCameraPageState extends State<LiveCameraPage> {
   bool historyOpen = false;
   bool playingRecording = false;
   bool recordingPlaybackLoading = false;
+  _LiveConnectionState connectionState = _LiveConnectionState.connecting;
+  String? videoQuality;
+  bool suspended = false;
 
   String get cameraAddress =>
       Uri.tryParse(widget.camera.rtspUrl)?.host ?? widget.camera.rtspUrl;
@@ -71,6 +76,7 @@ class _LiveCameraPageState extends State<LiveCameraPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final now = DateTime.now();
     selectedRecordingDay = DateTime(now.year, now.month, now.day);
     timelineCursor = now;
@@ -92,8 +98,47 @@ class _LiveCameraPageState extends State<LiveCameraPage> {
       ),
     );
     videoController = VideoController(player);
-    player.open(Media(widget.camera.rtspUrl, httpHeaders: streamHeaders));
-    _captureThumbnailWhenReady();
+    unawaited(_openLive());
+  }
+
+  Future<void> _openLive({bool reconnecting = false}) async {
+    if (!mounted || suspended) return;
+    setState(
+      () => connectionState = reconnecting
+          ? _LiveConnectionState.reconnecting
+          : _LiveConnectionState.connecting,
+    );
+    try {
+      await player.open(
+        Media(widget.camera.rtspUrl, httpHeaders: streamHeaders),
+        play: true,
+      );
+      unawaited(_markFirstFrameRendered());
+    } catch (_) {
+      if (!mounted || suspended) return;
+      setState(() => connectionState = _LiveConnectionState.offline);
+    }
+  }
+
+  Future<void> _markFirstFrameRendered() async {
+    try {
+      // Do not put a short timeout here. HLS over a mobile network can take more
+      // than fifteen seconds to produce the first frame; restarting the Player
+      // in that window prevents the stream from ever finishing its handshake.
+      await videoController.waitUntilFirstFrameRendered;
+      if (!mounted || suspended) return;
+      final params = player.state.videoParams;
+      setState(() {
+        connectionState = _LiveConnectionState.live;
+        if ((params.w ?? 0) > 0 && (params.h ?? 0) > 0) {
+          videoQuality = '${params.w}×${params.h}';
+        }
+      });
+      unawaited(_captureThumbnailWhenReady());
+    } catch (_) {
+      // Keep the native player opening. It already performs the HLS network
+      // work and must not be interrupted merely because status UI failed.
+    }
   }
 
   Future<void> _captureThumbnailWhenReady() async {
@@ -121,8 +166,31 @@ class _LiveCameraPageState extends State<LiveCameraPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     player.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      suspended = true;
+      unawaited(player.pause());
+      if (mounted && !playingRecording) {
+        setState(() => connectionState = _LiveConnectionState.paused);
+      }
+      return;
+    }
+    if (state == AppLifecycleState.resumed && suspended) {
+      suspended = false;
+      if (playingRecording) {
+        unawaited(player.play());
+      } else {
+        unawaited(_openLive(reconnecting: true));
+      }
+    }
   }
 
   Future<void> takeSnapshot() async {
@@ -150,8 +218,9 @@ class _LiveCameraPageState extends State<LiveCameraPage> {
       setState(() {
         recentSnapshots.removeWhere((item) => item.path == snapshot.path);
         recentSnapshots.insert(0, snapshot);
-        if (recentSnapshots.length > 3)
+        if (recentSnapshots.length > 3) {
           recentSnapshots.removeRange(3, recentSnapshots.length);
+        }
       });
     } catch (_) {
       if (!mounted) return;
@@ -303,17 +372,22 @@ class _LiveCameraPageState extends State<LiveCameraPage> {
     if (!end.isAfter(start)) return;
     setState(() => recordingPlaybackLoading = true);
     try {
-      final cache = await getTemporaryDirectory();
-      final file = File(
-        '${cache.path}/cami_${camera}_${start.millisecondsSinceEpoch}_${end.millisecondsSinceEpoch}.mp4',
-      );
-      await widget.frigateClient.downloadRecordingClip(
+      final file = await MediaCache.recordingFile(
         camera: camera,
         start: start,
         end: end,
-        token: token,
-        destination: file,
       );
+      if (!await MediaCache.isUsable(file)) {
+        if (await file.exists()) await file.delete();
+        await widget.frigateClient.downloadRecordingClip(
+          camera: camera,
+          start: start,
+          end: end,
+          token: token,
+          destination: file,
+        );
+        await MediaCache.prune();
+      }
       await player.open(Media(file.uri.toString()), play: true);
       if (mounted) {
         setState(() {
@@ -336,17 +410,29 @@ class _LiveCameraPageState extends State<LiveCameraPage> {
   }
 
   Future<void> returnToLive() async {
-    await player.open(
-      Media(widget.camera.rtspUrl, httpHeaders: streamHeaders),
-      play: true,
-    );
     if (mounted) {
       setState(() {
         playingRecording = false;
         selectedRecording = null;
       });
     }
+    await _openLive(reconnecting: true);
   }
+
+  String get connectionLabel => switch (connectionState) {
+    _LiveConnectionState.connecting => 'CONECTANDO',
+    _LiveConnectionState.live => 'AO VIVO',
+    _LiveConnectionState.reconnecting => 'RECONECTANDO',
+    _LiveConnectionState.paused => 'PAUSADO',
+    _LiveConnectionState.offline => 'SEM SINAL',
+  };
+
+  Color get connectionColor => switch (connectionState) {
+    _LiveConnectionState.live => statusGreen,
+    _LiveConnectionState.offline => Colors.redAccent,
+    _LiveConnectionState.paused => muted,
+    _ => Colors.amberAccent,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -383,8 +469,11 @@ class _LiveCameraPageState extends State<LiveCameraPage> {
                           ),
                           SizedBox(height: 3),
                           Text(
-                            '● Online',
-                            style: TextStyle(color: statusGreen, fontSize: 8),
+                            '● $connectionLabel',
+                            style: TextStyle(
+                              color: connectionColor,
+                              fontSize: 8,
+                            ),
                           ),
                         ],
                       ),
@@ -402,6 +491,15 @@ class _LiveCameraPageState extends State<LiveCameraPage> {
                         controls: NoVideoControls,
                       ),
                       Container(color: Colors.black26),
+                      if (connectionState == _LiveConnectionState.offline &&
+                          !playingRecording)
+                        Center(
+                          child: FilledButton.icon(
+                            onPressed: () => unawaited(_openLive()),
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Tentar novamente'),
+                          ),
+                        ),
                       if (recordingPlaybackLoading)
                         const Center(
                           child: Column(
@@ -417,11 +515,13 @@ class _LiveCameraPageState extends State<LiveCameraPage> {
                         left: 12,
                         top: 12,
                         child: Text(
-                          playingRecording ? '● GRAVAÇÃO' : '● AO VIVO',
+                          playingRecording
+                              ? '● GRAVAÇÃO'
+                              : '● $connectionLabel',
                           style: TextStyle(
                             color: playingRecording
                                 ? Colors.amberAccent
-                                : statusGreen,
+                                : connectionColor,
                             fontSize: 9,
                             fontWeight: FontWeight.bold,
                           ),
@@ -444,16 +544,16 @@ class _LiveCameraPageState extends State<LiveCameraPage> {
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
-                      const Row(
+                      Row(
                         children: [
                           Text(
-                            '●  Conexão estável  •  1080p',
-                            style: TextStyle(color: muted, fontSize: 8),
+                            '●  $connectionLabel',
+                            style: const TextStyle(color: muted, fontSize: 8),
                           ),
-                          Spacer(),
+                          const Spacer(),
                           Text(
-                            '24 FPS',
-                            style: TextStyle(color: muted, fontSize: 8),
+                            videoQuality ?? 'Preparando vídeo',
+                            style: const TextStyle(color: muted, fontSize: 8),
                           ),
                         ],
                       ),

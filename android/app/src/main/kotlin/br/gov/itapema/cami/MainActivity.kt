@@ -2,10 +2,7 @@ package br.gov.itapema.cami
 
 import android.Manifest
 import android.content.ContentValues
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Ikev2VpnProfile
-import android.net.VpnManager
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -16,14 +13,11 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterFragmentActivity() {
     private companion object {
         const val MEDIA_CHANNEL = "br.gov.itapema.cami/media"
-        const val VPN_CHANNEL = "br.gov.itapema.cami/vpn"
         const val STORAGE_PERMISSION_REQUEST = 741
-        const val VPN_CONSENT_REQUEST = 742
     }
 
     private var pendingSnapshot: ByteArray? = null
     private var pendingSnapshotResult: MethodChannel.Result? = null
-    private var pendingVpnResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -40,81 +34,6 @@ class MainActivity : FlutterFragmentActivity() {
                 }
                 saveSnapshot(bytes, result)
             }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VPN_CHANNEL)
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "connect" -> connectVpn(result)
-                    "disconnect" -> disconnectVpn(result)
-                    else -> result.notImplemented()
-                }
-            }
-    }
-
-    private fun connectVpn(result: MethodChannel.Result) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            result.error(
-                "unsupported_android_version",
-                "A VPN automática requer Android 11 ou superior.",
-                null,
-            )
-            return
-        }
-        if (BuildConfig.CAMI_VPN_SERVER.isBlank() ||
-            BuildConfig.CAMI_VPN_REMOTE_ID.isBlank() ||
-            BuildConfig.CAMI_VPN_PSK.isBlank()) {
-            result.error(
-                "vpn_not_configured",
-                "Configure CAMI_VPN_SERVER, CAMI_VPN_REMOTE_ID e CAMI_VPN_PSK em android/local.properties e gere um novo APK.",
-                null,
-            )
-            return
-        }
-        if (pendingVpnResult != null) {
-            result.error("vpn_consent_pending", "A autorização da VPN já está aberta.", null)
-            return
-        }
-
-        try {
-            val profile = Ikev2VpnProfile.Builder(
-                BuildConfig.CAMI_VPN_SERVER,
-                BuildConfig.CAMI_VPN_REMOTE_ID,
-            ).setAuthPsk(BuildConfig.CAMI_VPN_PSK.toByteArray(Charsets.UTF_8))
-                .setBypassable(false)
-                .build()
-            val manager = getSystemService(VpnManager::class.java)
-            val consentIntent = manager.provisionVpnProfile(profile)
-            if (consentIntent == null) {
-                startProvisionedVpn(manager)
-                result.success("connected")
-            } else {
-                pendingVpnResult = result
-                startActivityForResult(consentIntent, VPN_CONSENT_REQUEST)
-            }
-        } catch (error: Exception) {
-            result.error("vpn_connection_failed", "Não foi possível iniciar a VPN.", error.message)
-        }
-    }
-
-    private fun startProvisionedVpn(manager: VpnManager) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            manager.startProvisionedVpnProfileSession()
-        } else {
-            @Suppress("DEPRECATION")
-            manager.startProvisionedVpnProfile()
-        }
-    }
-
-    private fun disconnectVpn(result: MethodChannel.Result) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            result.success(false)
-            return
-        }
-        try {
-            getSystemService(VpnManager::class.java).stopProvisionedVpnProfile()
-            result.success(true)
-        } catch (error: Exception) {
-            result.error("vpn_disconnect_failed", "Não foi possível desconectar a VPN.", error.message)
-        }
     }
 
     private fun saveSnapshot(bytes: ByteArray, result: MethodChannel.Result) {
@@ -175,21 +94,4 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != VPN_CONSENT_REQUEST) return
-        val result = pendingVpnResult ?: return
-        pendingVpnResult = null
-        if (resultCode != RESULT_OK) {
-            result.error("vpn_consent_denied", "A autorização da VPN foi negada.", null)
-            return
-        }
-        try {
-            startProvisionedVpn(getSystemService(VpnManager::class.java))
-            result.success("connected")
-        } catch (error: Exception) {
-            result.error("vpn_connection_failed", "Não foi possível iniciar a VPN.", error.message)
-        }
-    }
 }

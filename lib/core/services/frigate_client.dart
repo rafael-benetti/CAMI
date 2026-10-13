@@ -29,21 +29,27 @@ class FrigateRecording {
       start.isBefore(rangeEnd) && end.isAfter(rangeStart);
 }
 
-/// Cliente do Frigate acessado pelo aparelho através da VPN.
+/// Cliente do Frigate acessado pelo endereço público configurado.
 ///
 /// Nenhuma credencial RTSP passa por esta integração: o app recebe vídeo e
 /// frames do Frigate, que continua sendo o único cliente das câmeras.
 class FrigateClient {
+  // Reuses keep-alive connections across thumbnail, history and storage calls.
+  // The process-wide client is intentionally kept for the app lifetime.
+  static final http.Client _sharedClient = http.Client();
+
   final String baseUrl;
   final http.Client? client;
 
   const FrigateClient({
     this.baseUrl = const String.fromEnvironment(
       'FRIGATE_BASE_URL',
-      defaultValue: 'http://192.168.2.212:5001',
+      defaultValue: 'https://cameraspmi.creativewave.com.br',
     ),
     this.client,
   });
+
+  http.Client get _activeClient => client ?? _sharedClient;
 
   Uri _uri(String path, {Map<String, String>? queryParameters}) {
     final root = Uri.parse(baseUrl);
@@ -56,32 +62,28 @@ class FrigateClient {
     );
   }
 
-  /// Quickly checks whether the private Frigate host is already reachable.
-  /// Any HTTP reply (including an authentication reply) means the local network
-  /// is available and a VPN connection is unnecessary.
+  /// Checks whether the Frigate host is reachable.
+  /// Any HTTP reply (including an authentication reply) means the service is
+  /// available.
   Future<bool> isReachable({
     Duration timeout = const Duration(milliseconds: 700),
   }) async {
-    final ownedClient = client == null ? http.Client() : null;
-    final activeClient = client ?? ownedClient!;
     try {
-      await activeClient.get(_uri('/api/version')).timeout(timeout);
+      await _activeClient.get(_uri('/api/version')).timeout(timeout);
       return true;
     } catch (_) {
       return false;
-    } finally {
-      ownedClient?.close();
     }
   }
 
   Future<http.Response> _getAuthenticated(Uri uri, {String? token}) async {
     try {
-      return await (client ?? http.Client())
+      return await _activeClient
           .get(uri, headers: _headers(token))
           .timeout(const Duration(seconds: 8));
     } catch (_) {
       throw const FrigateException(
-        'Não foi possível alcançar o Frigate. Verifique a VPN e o endereço configurado.',
+        'Não foi possível alcançar o Frigate. Verifique sua conexão e o endereço configurado.',
       );
     }
   }
@@ -93,7 +95,7 @@ class FrigateClient {
   Future<AuthSession> login(String username, String password) async {
     final http.Response response;
     try {
-      response = await (client ?? http.Client())
+      response = await _activeClient
           .post(
             _uri('/api/login'),
             headers: const {'Content-Type': 'application/json'},
@@ -102,7 +104,7 @@ class FrigateClient {
           .timeout(const Duration(seconds: 10));
     } catch (_) {
       throw const FrigateException(
-        'Não foi possível alcançar o Frigate. Verifique a VPN e o endereço configurado.',
+        'Não foi possível alcançar o Frigate. Verifique sua conexão e o endereço configurado.',
       );
     }
 
@@ -319,15 +321,13 @@ class FrigateClient {
     final uri = _uri(
       '/api/${Uri.encodeComponent(camera)}/start/$startSeconds/end/$endSeconds/clip.mp4',
     );
-    final ownedClient = client == null ? http.Client() : null;
-    final activeClient = client ?? ownedClient!;
     try {
       final request = http.Request('GET', uri)
         ..headers.addAll({
           ..._headers(token),
           'Accept': 'video/mp4,application/json',
         });
-      final response = await activeClient
+      final response = await _activeClient
           .send(request)
           .timeout(const Duration(seconds: 15));
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -350,8 +350,6 @@ class FrigateClient {
       rethrow;
     } catch (_) {
       throw const FrigateException('Não foi possível baixar esta gravação.');
-    } finally {
-      ownedClient?.close();
     }
   }
 

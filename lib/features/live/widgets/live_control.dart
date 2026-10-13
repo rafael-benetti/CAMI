@@ -8,6 +8,7 @@ class LiveControl extends StatelessWidget {
   final bool active;
   final VoidCallback? onTap;
   const LiveControl({
+    super.key,
     required this.icon,
     required this.label,
     this.active = false,

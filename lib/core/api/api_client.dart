@@ -4,10 +4,11 @@ import 'package:http/http.dart' as http;
 
 import '../../models/auth_session.dart';
 import '../../models/camera_item.dart';
-import '../../models/vpn_configuration.dart';
 import '../errors/api_exception.dart';
 
 class ApiClient {
+  static final http.Client _sharedClient = http.Client();
+
   final String baseUrl;
   final http.Client? client;
 
@@ -18,6 +19,8 @@ class ApiClient {
     ),
     this.client,
   });
+
+  http.Client get _activeClient => client ?? _sharedClient;
 
   Future<AuthSession> login(String email, String password) async {
     return _authenticate('/auth/login', {
@@ -43,7 +46,7 @@ class ApiClient {
     Map<String, dynamic> body,
   ) async {
     try {
-      final response = await (client ?? http.Client())
+      final response = await _activeClient
           .post(
             Uri.parse('$baseUrl$path'),
             headers: const {'Content-Type': 'application/json'},
@@ -70,8 +73,6 @@ class ApiClient {
       );
     }
   }
-
-  http.Client get _http => client ?? http.Client();
 
   Future<List<CameraItem>> fetchCameras(String token) async {
     final response = await _request('GET', '/cameras', token: token);
@@ -126,49 +127,6 @@ class ApiClient {
 
   Future<Map<String, dynamic>> fetchCameraStatus(String token, int id) {
     return _request('GET', '/cameras/$id/status', token: token);
-  }
-
-  Future<VpnConfiguration> fetchVpnConfig(
-    String token,
-    VpnPlatform platform,
-  ) async {
-    final response = await _request(
-      'GET',
-      '/vpn/config/${platform.apiValue}',
-      token: token,
-    );
-    return VpnConfiguration.fromJson(
-      response['config'] as Map<String, dynamic>,
-    );
-  }
-
-  Future<VpnConfiguration?> fetchAdminVpnConfig(
-    String token,
-    VpnPlatform platform,
-  ) async {
-    final response = await _request(
-      'GET',
-      '/admin/vpn-configurations/${platform.apiValue}',
-      token: token,
-    );
-    final config = response['config'];
-    if (config == null) return null;
-    return VpnConfiguration.fromJson(config as Map<String, dynamic>);
-  }
-
-  Future<VpnConfiguration> saveAdminVpnConfig(
-    String token,
-    VpnConfiguration configuration,
-  ) async {
-    final response = await _request(
-      'PATCH',
-      '/admin/vpn-configurations/${configuration.platform.apiValue}',
-      token: token,
-      body: configuration.toJson(),
-    );
-    return VpnConfiguration.fromJson(
-      response['config'] as Map<String, dynamic>,
-    );
   }
 
   Future<List<Map<String, dynamic>>> fetchUsers(String token) async {
@@ -280,7 +238,7 @@ class ApiClient {
     final request = http.Request(method, Uri.parse('$baseUrl$path'))
       ..headers.addAll(headers);
     if (body != null) request.body = jsonEncode(body);
-    final response = await _http
+    final response = await _activeClient
         .send(request)
         .timeout(const Duration(seconds: 15));
     final text = await response.stream.bytesToString();

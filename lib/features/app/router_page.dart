@@ -9,14 +9,12 @@ import '../../core/api/api_client.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/services/frigate_client.dart';
 import '../../core/services/biometric_auth.dart';
-import '../../core/services/ipsec_vpn.dart';
 import '../../core/navigation/app_screen.dart';
 import '../../core/services/video_thumbnail_capture.dart';
 import '../../data/cache/camera_card_cache.dart';
 import '../../data/cache/thumbnail_cache.dart';
 import '../../models/auth_session.dart';
 import '../../models/camera_item.dart';
-import '../../models/vpn_configuration.dart';
 import 'app_branding.dart';
 import '../auth/presentation/login_page.dart';
 import '../cameras/presentation/add_camera_page.dart';
@@ -41,19 +39,19 @@ class RouterPage extends StatefulWidget {
 }
 
 class _RouterPageState extends State<RouterPage> {
+  static const _thumbnailFreshFor = Duration(minutes: 30);
+
   late Screen screen;
   bool restoringSession = false;
   String? authToken;
   bool isAdmin = false;
   bool canCreateCameras = false;
-  VpnConfiguration? vpnConfiguration;
   CameraItem? selectedCamera;
   CameraItem? editingCamera;
   final List<CameraItem> cameras = [];
   final Set<int> thumbnailJobs = <int>{};
   int thumbnailRefreshGeneration = 0;
   String? cameraCacheKey;
-  final Completer<void> restoreGate = Completer<void>();
 
   @override
   void initState() {
@@ -62,66 +60,53 @@ class _RouterPageState extends State<RouterPage> {
     if (widget.initialScreen == Screen.login) {
       restoringSession = true;
       unawaited(restoreSession());
-      unawaited(prepareNetwork());
     }
   }
 
-  Future<void> prepareNetwork() async {
-    final localFrigate = await widget.frigateClient.isReachable();
-    if (localFrigate) return;
-    // Do not overlap Android's VPN consent dialog with biometric auth.
-    await restoreGate.future;
-    await IpsecVpn.connectOnLaunch();
-  }
-
   Future<void> restoreSession() async {
-    try {
-      final preferences = await SharedPreferences.getInstance();
-      final token = preferences.getString('cami.auth_token');
-      final encodedUser = preferences.getString('cami.auth_user');
-      Map<String, dynamic>? user;
-      if (encodedUser != null) {
-        try {
-          user = Map<String, dynamic>.from(jsonDecode(encodedUser) as Map);
-        } catch (_) {
-          user = null;
+    final preferences = await SharedPreferences.getInstance();
+    final token = preferences.getString('cami.auth_token');
+    final encodedUser = preferences.getString('cami.auth_user');
+    Map<String, dynamic>? user;
+    if (encodedUser != null) {
+      try {
+        user = Map<String, dynamic>.from(jsonDecode(encodedUser) as Map);
+      } catch (_) {
+        user = null;
+      }
+    }
+    final restoredUser = user;
+    if (token != null && restoredUser != null) {
+      final enabled =
+          preferences.getBool('cami.biometric_enabled') ??
+          await BiometricAuth.isAvailable();
+      if (enabled) {
+        await preferences.setBool('cami.biometric_enabled', true);
+        final authenticated = await BiometricAuth.authenticate();
+        if (!authenticated) {
+          if (mounted) setState(() => restoringSession = false);
+          return;
         }
       }
-      final restoredUser = user;
-      if (token != null && restoredUser != null) {
-        final enabled =
-            preferences.getBool('cami.biometric_enabled') ??
-            await BiometricAuth.isAvailable();
-        if (enabled) {
-          await preferences.setBool('cami.biometric_enabled', true);
-          final authenticated = await BiometricAuth.authenticate();
-          if (!authenticated) {
-            if (mounted) setState(() => restoringSession = false);
-            return;
-          }
-        }
-        final cacheKey = CameraCardCache.keyFor(restoredUser);
-        final cachedCameras = await CameraCardCache.load(cacheKey);
-        if (!mounted) return;
-        setState(() {
-          authToken = token;
-          cameraCacheKey = cacheKey;
-          isAdmin = false;
-          canCreateCameras = false;
-          cameras
-            ..clear()
-            ..addAll(cachedCameras);
-          screen = Screen.home;
-          restoringSession = false;
-        });
-        unawaited(loadCachedThumbnails(cachedCameras));
-        unawaited(initializeAuthenticatedSession());
-      } else {
-        if (!mounted) return;
-        setState(() => restoringSession = false);
-      }
-    } finally {
-      if (!restoreGate.isCompleted) restoreGate.complete();
+      final cacheKey = CameraCardCache.keyFor(restoredUser);
+      final cachedCameras = await CameraCardCache.load(cacheKey);
+      if (!mounted) return;
+      setState(() {
+        authToken = token;
+        cameraCacheKey = cacheKey;
+        isAdmin = false;
+        canCreateCameras = false;
+        cameras
+          ..clear()
+          ..addAll(cachedCameras);
+        screen = Screen.home;
+        restoringSession = false;
+      });
+      unawaited(loadCachedThumbnails(cachedCameras));
+      unawaited(initializeAuthenticatedSession());
+    } else {
+      if (!mounted) return;
+      setState(() => restoringSession = false);
     }
   }
 
@@ -165,19 +150,45 @@ class _RouterPageState extends State<RouterPage> {
   }
 
   Future<Set<int>> loadCachedThumbnails(List<CameraItem> loaded) async {
-    final cachedCameraIds = <int>{};
-    await Future.wait(
+    final entries = await Future.wait(
       loaded.map((camera) async {
         final id = camera.id;
-        if (id == null) return;
-        final thumbnail = await ThumbnailCache.read(id);
-        if (thumbnail != null && thumbnail.isNotEmpty && mounted) {
-          cachedCameraIds.add(id);
-          updateCameraThumbnail(camera, thumbnail);
-        }
+        if (id == null) return (camera, null);
+        return (camera, await ThumbnailCache.readEntry(id));
       }),
     );
-    return cachedCameraIds;
+    if (!mounted) return <int>{};
+
+    final freshCameraIds = <int>{};
+    final thumbnails = <int, Uint8List>{};
+    final now = DateTime.now();
+    for (final entry in entries) {
+      final id = entry.$1.id;
+      final cached = entry.$2;
+      if (id == null || cached == null) continue;
+      thumbnails[id] = cached.bytes;
+      if (cached.isFresh(_thumbnailFreshFor, now)) freshCameraIds.add(id);
+    }
+    if (thumbnails.isEmpty) return freshCameraIds;
+
+    // Apply the disk cache in a single frame. Updating one thumbnail at a time
+    // causes a rebuild per camera during session restoration.
+    setState(() {
+      for (var index = 0; index < cameras.length; index++) {
+        final camera = cameras[index];
+        final thumbnail = camera.id == null ? null : thumbnails[camera.id];
+        if (thumbnail == null) continue;
+        cameras[index] = CameraItem(
+          id: camera.id,
+          name: camera.name,
+          place: camera.place,
+          rtspUrl: camera.rtspUrl,
+          online: camera.online,
+          thumbnail: thumbnail,
+        );
+      }
+    });
+    return freshCameraIds;
   }
 
   Future<void> refreshCameraThumbnails({
@@ -194,13 +205,13 @@ class _RouterPageState extends State<RouterPage> {
         )
         .toList();
 
-    // Mantém no máximo três conexões de vídeo simultâneas para não sobrecarregar
-    // o celular, o backend ou a rede quando houver muitas câmeras cadastradas.
+    // Frames HTTP são baratos, mas a grade não pode competir com o stream que
+    // o usuário está assistindo. Limitar a dois reduz o uso de rede móvel.
     while (pending.isNotEmpty &&
         mounted &&
         generation == thumbnailRefreshGeneration) {
       final batch = <CameraItem>[];
-      while (batch.length < 3 && pending.isNotEmpty) {
+      while (batch.length < 2 && pending.isNotEmpty) {
         final camera = pending.removeAt(0);
         if (camera.id != null && thumbnailJobs.add(camera.id!)) {
           batch.add(camera);
@@ -216,12 +227,11 @@ class _RouterPageState extends State<RouterPage> {
               camera.rtspUrl,
             );
             final thumbnail = frigateCamera == null
-                ? await captureVideoThumbnail(camera.rtspUrl)
+                ? null
                 : await widget.frigateClient.fetchLatestFrame(
-                        frigateCamera,
-                        token: authToken ?? '',
-                      ) ??
-                      await captureVideoThumbnail(camera.rtspUrl);
+                    frigateCamera,
+                    token: authToken ?? '',
+                  );
             if (thumbnail != null && thumbnail.isNotEmpty && mounted) {
               updateCameraThumbnail(camera, thumbnail);
             }
@@ -317,7 +327,7 @@ class _RouterPageState extends State<RouterPage> {
   }
 
   Future<void> logout() async {
-    await IpsecVpn.disconnect();
+    thumbnailRefreshGeneration++;
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove('cami.auth_token');
     await preferences.remove('cami.auth_user');
@@ -327,14 +337,12 @@ class _RouterPageState extends State<RouterPage> {
       isAdmin = false;
       canCreateCameras = false;
       cameraCacheKey = null;
-      vpnConfiguration = null;
       cameras.clear();
+      thumbnailJobs.clear();
       selectedCamera = null;
       screen = Screen.login;
     });
   }
-
-  Future<void> disconnectVpn() => IpsecVpn.disconnect();
 
   void editCamera(CameraItem camera) {
     setState(() {
@@ -424,9 +432,9 @@ class _RouterPageState extends State<RouterPage> {
       go: go,
       cameras: cameras,
       onOpenCamera: openCamera,
+      onRefreshCameras: loadCameras,
       canAddCamera: false,
       onLogout: logout,
-      onDisconnectVpn: disconnectVpn,
       frigateClient: widget.frigateClient,
       frigateToken: authToken,
       thumbnailLoadingIds: thumbnailJobs,
@@ -440,5 +448,11 @@ class _RouterPageState extends State<RouterPage> {
       hash = (hash * 0x01000193) & 0x7fffffff;
     }
     return hash == 0 ? 1 : hash;
+  }
+
+  @override
+  void dispose() {
+    thumbnailRefreshGeneration++;
+    super.dispose();
   }
 }

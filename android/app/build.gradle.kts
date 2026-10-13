@@ -1,22 +1,8 @@
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
-
-val localProperties = Properties().apply {
-    val propertiesFile = rootProject.file("local.properties")
-    if (propertiesFile.exists()) {
-        propertiesFile.inputStream().use { stream -> load(stream) }
-    }
-}
-
-fun localBuildConfigValue(name: String): String =
-    localProperties.getProperty(name, "")
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
 
 android {
     namespace = "br.gov.itapema.cami"
@@ -39,27 +25,6 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // These values are deliberately read from android/local.properties,
-        // which is ignored by Git. They are only for the local IKEv2 test APK.
-        buildConfigField(
-            "String",
-            "CAMI_VPN_SERVER",
-            "\"${localBuildConfigValue("CAMI_VPN_SERVER")}\"",
-        )
-        buildConfigField(
-            "String",
-            "CAMI_VPN_REMOTE_ID",
-            "\"${localBuildConfigValue("CAMI_VPN_REMOTE_ID")}\"",
-        )
-        buildConfigField(
-            "String",
-            "CAMI_VPN_PSK",
-            "\"${localBuildConfigValue("CAMI_VPN_PSK")}\"",
-        )
-    }
-
-    buildFeatures {
-        buildConfig = true
     }
 
     buildTypes {

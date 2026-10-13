@@ -9,8 +9,6 @@ Aplicativo Flutter para monitoramento de câmeras pelo Frigate NVR. O CAMI auten
 - Histórico diário de gravações, download autenticado do MP4 e reprodução local.
 - Snapshot no ao vivo ou durante uma gravação.
 - Indicador de armazenamento do Frigate.
-- VPN IKEv2/IPsec nativa no Android, configurada exclusivamente por
-  `android/local.properties`.
 
 Consulte [`docs/STATUS.md`](docs/STATUS.md) e [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -28,10 +26,9 @@ flutter analyze
 flutter test
 ```
 
-O endereço do Frigate pode ser informado no build com
-`--dart-define=FRIGATE_BASE_URL=<url-do-frigate>`. Credenciais de VPN e de
-assinatura Android não são versionadas; consulte
-[`docs/ANDROID_IKEV2_TEST.md`](docs/ANDROID_IKEV2_TEST.md).
+Por padrão, o app usa `https://cameraspmi.creativewave.com.br`. O endereço pode
+ser substituído em builds de desenvolvimento com
+`--dart-define=FRIGATE_BASE_URL=<url-do-frigate>`.
 
 No iOS, abra `ios/Runner.xcworkspace` (não apenas o `.xcodeproj`). O deployment target mínimo está em 15.0.
 

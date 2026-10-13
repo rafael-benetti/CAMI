@@ -11,7 +11,6 @@
 | Eventos | Estrutura visual, sem fonte de dados |
 | Gravações | Estrutura visual; gravação não persistida |
 | Configurações | Estrutura visual |
-| Perfis VPN | Administrador cadastra perfis Android e iOS com servidor, conta, senha e segredo compartilhado pela API; túnel nativo ainda não integrado |
 | Testes | Smoke tests widget para dashboard e cadastro |
 
 ## Gaps de produção
@@ -24,7 +23,6 @@
 - Implementar health check real e reconexão do stream.
 - Definir gravação local/nuvem e retenção.
 - Adicionar estados de loading, erro, offline e permissões.
-- Integrar o cliente VPN nativo compatível com o protocolo do gateway no Android e no iOS, com provisionamento seguro das credenciais.
 - Cobrir Android/iOS reais, não apenas Simulator.
 
 ## Decisões em aberto

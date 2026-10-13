@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_colors.dart';
-import '../../../models/camera_item.dart';
 
 class CameraTile extends StatelessWidget {
   final String name;
@@ -39,7 +38,13 @@ class CameraTile extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 if (thumbnail != null)
-                  Image.memory(thumbnail!, fit: BoxFit.cover)
+                  Image.memory(
+                    thumbnail!,
+                    fit: BoxFit.cover,
+                    // Cards never need the full source frame in the image
+                    // cache; decoding a bounded preview keeps scrolling smooth.
+                    cacheWidth: 480,
+                  )
                 else
                   Image.asset('assets/images.png', fit: BoxFit.cover),
                 Container(color: Colors.black26),
